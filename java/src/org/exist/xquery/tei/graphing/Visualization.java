@@ -26,36 +26,15 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.regex.*;
 
-import org.apache.log4j.Logger;
-
-import org.apache.batik.dom.GenericDOMImplementation;
-import org.apache.batik.svggen.SVGGeneratorContext;
-import org.apache.batik.svggen.SVGGraphics2D;
-import org.apache.batik.svggen.SVGGraphics2DIOException;
-import org.apache.commons.io.output.ByteArrayOutputStream;
-
-import edu.uci.ics.jung.visualization.VisualizationImageServer;
-import edu.uci.ics.jung.visualization.decorators.ToStringLabeller;
-import edu.uci.ics.jung.algorithms.layout.FRLayout;
-import edu.uci.ics.jung.algorithms.layout.Layout;
-import edu.uci.ics.jung.graph.Graph;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.exist.Namespaces;
-import org.exist.collections.Collection;
-import org.exist.dom.BinaryDocument;
-import org.exist.dom.DocumentImpl;
+//import org.exist.dom.persistent.BinaryDocument;
+//import org.exist.dom.persistent.DocumentImpl;
 import org.exist.dom.QName;
-import org.exist.memtree.MemTreeBuilder;
-import org.exist.memtree.NodeImpl;
-import org.exist.security.PermissionDeniedException;
-import org.exist.storage.BrokerPool;
-import org.exist.storage.DBBroker;
-import org.exist.storage.lock.Lock;
-import org.exist.storage.txn.TransactionManager;
-import org.exist.storage.txn.Txn;
-import org.exist.util.MimeType;
-import org.exist.util.VirtualTempFile;
-import org.exist.xmldb.XmldbURI;
+//import org.exist.security.PermissionDeniedException;
+//import org.exist.xmldb.XmldbURI;
 import org.exist.xquery.*;
 import org.exist.xquery.modules.ModuleUtils;
 import org.exist.xquery.tei.TEIGraphingModule;
@@ -66,7 +45,6 @@ import org.exist.xquery.value.*;
 
 import org.w3c.dom.DOMImplementation;
 import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 
@@ -76,7 +54,7 @@ import org.w3c.dom.Node;
  * @author ljo
  */
 public class Visualization extends BasicFunction {
-    private final static Logger LOG = Logger.getLogger(Visualization.class);
+    private final static Logger LOG = LogManager.getLogger(Visualization.class);
     
     public final static FunctionSignature signatures[] = {
         new FunctionSignature(
@@ -100,7 +78,7 @@ public class Visualization extends BasicFunction {
                                   new FunctionParameterSequenceType("listRelations", Type.ELEMENT, Cardinality.ONE_OR_MORE,
                                                                     "The tei:listRelation elements to create the graph from"),
                                   new FunctionParameterSequenceType("configuration", Type.ELEMENT, Cardinality.EXACTLY_ONE,
-                                                                    "The configuration, currently only output type, eg &lt;parameters&gt;&lt;param name='output' value='svg'/&gt;&lt;/parameters&gt;. Values for 'output' can be 'svg' or 'graphml'.")
+                                                                    "The configuration, eg, for output type, edge shape and layout, &lt;parameters&gt;&lt;param name='output' value='svg'/&gt;&lt;/parameters&gt;.")
                               },
                               new FunctionReturnSequenceType(Type.NODE, Cardinality.EXACTLY_ONE,
                                                              "The serialized relation graph.")
@@ -129,8 +107,6 @@ public class Visualization extends BasicFunction {
             && getSignature().getArgumentCount() == 5 ? true : false;
 
         Properties parameters = new Properties();
-        parameters.setProperty("output", "svg");
-        parameters.setProperty("edgeshape", "line");
 
         context.pushDocumentContext();
         ValueSequence result = new ValueSequence();
@@ -152,13 +128,20 @@ public class Visualization extends BasicFunction {
                 }
             }
             LOG.info("Number of Relations (edges):" + relationGraph.edgeCount());
-             
+
             if (isCalledAs("relation-graph")
                 && getSignature().getArgumentCount() == 3) {
                 if (!args[2].isEmpty()) {
                     parameters = ModuleUtils.parseParameters(((NodeValue)args[2].itemAt(0)).getNode());
                 }
             }
+
+	    boolean removeUnconnected = Boolean.parseBoolean(parameters.getProperty("removeunconnected", "false").toLowerCase());
+	    if (removeUnconnected) {
+		removeUnconnectedGroupOrNonPersonVertices();
+	    }
+		    
+	    
             RelationGraphSerializer rgs = new RelationGraphSerializer(context, relationGraph);
             return rgs.relationGraphReport(parameters, vertexFromSubjectId.size());
         } finally {
@@ -218,11 +201,14 @@ public class Visualization extends BasicFunction {
         String sex = "unknown";
         String age = "unknown";
         String occupation = "unknown";
+        String role = "person";
         
         if (listPerson.getNodeType() == Node.ELEMENT_NODE && listPerson.getLocalName().equals("listPerson") && listPerson.getNamespaceURI().equals(RelationGraphSerializer.TEI_NS)) {
             NamedNodeMap attrs = listPerson.getAttributes();
             if (attrs.getLength() > 0) {
-                type = attrs.getNamedItem("type").getNodeValue();
+		if (attrs.getNamedItem("type") != null) {
+		    type = attrs.getNamedItem("type").getNodeValue();
+		}
             }
             //Get the listPerson children
             Node child = listPerson.getFirstChild();
@@ -280,6 +266,7 @@ public class Visualization extends BasicFunction {
         String sex = "unknown";
         String age = "unknown";
         String occupation = "unknown";
+        String role = "person";
         String sortKey = "";
         int weight = 1;
         NamedNodeMap persAttrs = child.getAttributes();
@@ -295,6 +282,10 @@ public class Visualization extends BasicFunction {
             }
             if (persAttrs.getNamedItem("sex") != null && !"".equals(persAttrs.getNamedItem("sex").getNodeValue())) {
                 sex = persAttrs.getNamedItem("sex").getNodeValue();
+            }
+
+	    if (persAttrs.getNamedItem("role") != null && !"".equals(persAttrs.getNamedItem("role").getNodeValue())) {
+                role = persAttrs.getNamedItem("role").getNodeValue();
             }
 
             if (persAttrs.getNamedItem("sortKey") != null && !"".equals(persAttrs.getNamedItem("sortKey").getNodeValue())) {
@@ -351,16 +342,20 @@ public class Visualization extends BasicFunction {
                         String ageAtMost;
                         String ageAtLeast;
                         if (ageAttrs.getLength() > 0) {
-                            try {
-                                ageAtMost = ageAttrs.getNamedItem("atMost").getNodeValue();
-                                value = ageAtMost;
-                            } catch (NullPointerException npe2) {
-                                try {
-                                    ageAtLeast = ageAttrs.getNamedItem("atLeast").getNodeValue();
-                                    value = ageAtLeast;
-                                } catch (NullPointerException npe3) {
-                                    LOG.error("Element 'age' is missing text node value and has neither atLeast nor atMost attribute value.");
-                                }
+			    try {
+                                value = ageAttrs.getNamedItem("value").getNodeValue();
+                            } catch (NullPointerException npev) {
+				try {
+				    ageAtMost = ageAttrs.getNamedItem("atMost").getNodeValue();
+				    value = ageAtMost;
+				} catch (NullPointerException npe2) {
+				    try {
+					ageAtLeast = ageAttrs.getNamedItem("atLeast").getNodeValue();
+					value = ageAtLeast;
+				    } catch (NullPointerException npe3) {
+                                    LOG.error("Element 'age' is missing text node value and has neither value, atLeast nor atMost attribute value.");
+				    }
+				}
                             }
                         }
                     } catch (Exception e) {
@@ -368,7 +363,7 @@ public class Visualization extends BasicFunction {
                     }
 
                     if (value == null) {
-                        LOG.error("Element age is missing text node value and has neither atLeast nor atMost attribute.");
+                        LOG.error("Element age is missing text node value and has neither value, atLeast nor atMost attribute.");
                     } else {
                         age = value;
                     }
@@ -381,28 +376,28 @@ public class Visualization extends BasicFunction {
             persName = persId;
         }
 
-        LOG.info("parsePersons::" + persId +":"+ persName +":"+ type +":"+ sex +":"+ age +":"+ occupation);
+        LOG.info("parsePersons::" + persId +":"+ persName +":"+ type +":"+ sex +":"+ age +":"+ occupation +":"+ role);
         
         if (sortKey != null) {
             try {
                 weight = Integer.parseInt(sortKey);
                 if (child.getLocalName().equals("personGrp")) {
-                    vertexFromSubjectId.put(persId, relationGraph.add(new WeightedPersonSubject(persId, persName, type, sex, age, occupation, true, weight)));
+                    vertexFromSubjectId.put(persId, relationGraph.add(new WeightedPersonSubject(persId, persName, type, sex, age, occupation, role, true, weight)));
                 } else {
-                    vertexFromSubjectId.put(persId, relationGraph.add(new WeightedPersonSubject(persId, persName, type, sex, age, occupation, weight)));
+                    vertexFromSubjectId.put(persId, relationGraph.add(new WeightedPersonSubject(persId, persName, type, sex, age, occupation, role, weight)));
                 }
             } catch (NumberFormatException e) {
                 if (child.getLocalName().equals("personGrp")) {
-                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, true)));
+                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, role, true)));
                 } else {
-                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation)));
+                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, role)));
                 }
             }
         } else {
             if (child.getLocalName().equals("personGrp")) {
-                vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, true)));
+                vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, role, true)));
             } else {
-                vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation)));
+                vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, persName, type, sex, age, occupation, role)));
             }
         }
     }
@@ -525,7 +520,8 @@ public class Visualization extends BasicFunction {
             String persName = "unknown";
             String sex = "unknown";
             String age = "unknown";
-            String occupation = "unknown";
+	    String occupation = "unknown";
+            String role = "person";
 
             //Parse each of the listPersonChild nodes
 	    if (listPersonChild.getLocalName().equals("listPerson") &&
@@ -550,6 +546,10 @@ public class Visualization extends BasicFunction {
 
                         if (persGrpAttrs.getNamedItem("sex") != null && !"".equals(persGrpAttrs.getNamedItem("sex").getNodeValue())) {
                             sex = persGrpAttrs.getNamedItem("sex").getNodeValue();
+                        }
+
+			if (persGrpAttrs.getNamedItem("role") != null && !"".equals(persGrpAttrs.getNamedItem("role").getNodeValue())) {
+                            role = persGrpAttrs.getNamedItem("role").getNodeValue();
                         }
                     }
 
@@ -594,8 +594,8 @@ public class Visualization extends BasicFunction {
                         grpChild = grpChild.getNextSibling();
                     }
 		    final String nameOrId = "unknown".equals(persName) ? persId : persName;
-                    LOG.info("parseListPersons::personGrp: " + persId + ":" + nameOrId +":"+ type +":"+ sex +":"+ age +":"+ occupation);
-                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, nameOrId, type, sex, age, occupation, true)));
+                    LOG.info("parseListPersons::personGrp: " + persId + ":" + nameOrId +":"+ type +":"+ sex +":"+ age +":"+ occupation +":"+ role);
+                    vertexFromSubjectId.put(persId, relationGraph.add(new PersonSubject(persId, nameOrId, type, sex, age, occupation, role, true)));
                 } else if (listPersonChild.getLocalName().equals("person") &&
                            listPersonChild.getNamespaceURI().equals(RelationGraphSerializer.TEI_NS)) {
                     LOG.info("listPerson/listPerson/person");
@@ -683,7 +683,17 @@ public class Visualization extends BasicFunction {
                                 if (relAttrs.getNamedItem("passive") != null && !"".equals(relAttrs.getNamedItem("passive").getNodeValue())) { 
                                 passive = getIds(relAttrs.getNamedItem("passive").getNodeValue());
                                 LOG.info("parseListRelations::activePassive: " + relType +":"+ name);
-                                connectActivePassive(relType, name, active, passive);
+				if (relSortKey != null) {
+                                    try {
+                                        int weight = Integer.parseInt(relSortKey);
+					connectActivePassive(relType, name, weight, active, passive);
+                                    } catch (NumberFormatException e) {
+					connectActivePassive(relType, name, active, passive);
+                                    }
+                                } else {
+				    connectActivePassive(relType, name, active, passive);
+                                }
+
 				} else {
 				LOG.error("parseListRelations::activePassive - @active without @passive: " + relType + ":" + name);
 				}
@@ -743,8 +753,17 @@ public class Visualization extends BasicFunction {
         }
     }
 
+    private void connectActivePassive(String type, String name, int weight, String[] activeSubjectIds, String[] passiveSubjectIds) {
+        Relation r1 = new WeightedRelation(name, type, weight);
+        connectActivePassive(r1, activeSubjectIds, passiveSubjectIds);
+    }
+
     private void connectActivePassive(String type, String name, String[] activeSubjectIds, String[] passiveSubjectIds) {
         Relation r1 = new Relation(name, type);
+	connectActivePassive(r1, activeSubjectIds, passiveSubjectIds);
+    }
+
+    private void connectActivePassive(Relation relation, String[] activeSubjectIds, String[] passiveSubjectIds) {
         for (String activeId : activeSubjectIds) {
             for (String passiveId : passiveSubjectIds) {
                 if (!activeId.equals(passiveId)) {
@@ -753,10 +772,28 @@ public class Visualization extends BasicFunction {
                     } else if (vertexFromSubjectId.get(passiveId) == null) {
                         LOG.error("Vertex is missing for passiveId: " + passiveId);
                     } else {
-                        relationGraph.connectDirected(vertexFromSubjectId.get(activeId), vertexFromSubjectId.get(passiveId), r1);
+                        relationGraph.connectDirected(vertexFromSubjectId.get(activeId), vertexFromSubjectId.get(passiveId), relation);
                     }
                 }
             }
         }
+    }
+    /**
+     * Remove unconnected group vertices from the graph.
+     *
+     */
+    private void removeUnconnectedGroupOrNonPersonVertices() {
+	//for (String sid : vertexFromSubjectId)
+	//relationGraph.subjects();
+	for (RelationGraph.Vertex vertex : relationGraph.vertices()) {
+	    if (vertex.relations().size() == 0) {
+		if ((vertex.subject() instanceof PersonSubject && ((PersonSubject) vertex.subject()).isGroup()) ||
+		    (vertex.subject() instanceof PersonSubject && !((PersonSubject) vertex.subject()).getRoleType().toString().equals("person")) ||
+		    vertex.subject() instanceof OrgSubject) {
+		    LOG.info("No relations for vertex: " + vertex);
+		    vertex.delete();
+		}
+	    }
+	}
     }
 }

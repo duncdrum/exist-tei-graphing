@@ -5,7 +5,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import org.exist.xquery.tei.graphing.RelationGraph;
 import org.exist.xquery.tei.graphing.Relation;
@@ -15,7 +16,7 @@ import org.exist.xquery.tei.graphing.Subject;
  * @author ljo
  */
 public class JungRelationGraphVertex implements RelationGraph.Vertex {
-    private final static Logger LOG = Logger.getLogger(JungRelationGraphVertex.class);
+    private final static Logger LOG = LogManager.getLogger(JungRelationGraphVertex.class);
     private final JungRelationGraph graph;
     private final Subject subject;
 
@@ -50,6 +51,9 @@ public class JungRelationGraphVertex implements RelationGraph.Vertex {
         for (RelationGraph.Edge edge : incoming()) {
             relations.add(edge.relation());
         }
+	for (RelationGraph.Edge edge : outgoing()) {
+            relations.add(edge.relation());
+        }
         return relations;
     }
 
@@ -75,11 +79,13 @@ public class JungRelationGraphVertex implements RelationGraph.Vertex {
 
     protected static Set<? extends RelationGraph.Edge> paths(final Iterable<JungRelationGraphEdge> edges, final Set<Relation> relations) {
         Set<RelationGraph.Edge> hs = new HashSet();
-        //for (RelationGraph.Edge edge : edges) {
-        //   if (relations.contains(edge.relation())) {
-        //         hs.add(edge);
-        //    }
-        //}
+        for (RelationGraph.Edge edge : edges) {
+	    if (relations == null) {
+                 hs.add(edge);
+	    } else if (relations.contains(edge.relation())) {
+                 hs.add(edge);
+            }
+        }
         return hs;
     }
 }
