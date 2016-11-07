@@ -77,10 +77,36 @@ Parameters:
 
     $listRelations+ 	The tei:listRelation elements to create the graph from
 
-    $configuration 	The configuration, currently only output type, eg &lt;parameters&gt;&lt;param name='output' value='svg'/&gt;&lt;/parameters&gt;. Values for 'output' can be 'svg' or 'graphml'.
+    $configuration 	The configuration, eg &lt;parameters&gt;&lt;param name='output' value='svg'/&gt;&lt;/parameters&gt;.'.
 Returns:
     node() : The serialized relation graph.
 
+## Configuration parameters
+Configuration parameters can be given as a parameters element fragment, eg &lt;parameters&gt;&lt;param name='output' value='svg'/&gt;&lt;/parameters&gt;. The current parameters are the following with the default given as first value:
+* output: values 'svg', 'graphml', 'gexf'.
+* svg-width: (for svg output) 960 if less than 28 vertices, 1200 if less than 56 vertices, 1600 if less than 83 vertices, and 2200 if more, integer value
+* svg-height: (for svg output) 600 if less than 28 vertices, 800 if less than 56 vertices, 1000 if less than 83 vertices, and 1400 if more, integer value
+* svg-useedgeweight: true, boolean value, use weight on edges to make them thicker if true
+* svg-showedgelabels: true, boolean value, show edge labels if true
+* dashedstrokeorgs: false, boolean value, use dashed stroke for organisations if true
+* edgeshape: values 'line', 'bentline' ('bent'), 'box', 'cubiccurve' ('cubic'), 'loop', 'orthogonal', 'quadcurve' ('quad'), 'simpleloop', 'wedge'.
+* layout: values 'frlayout' ('fr'), 'circlelayout' ('circle'), 'daglayout' ('dag'), 'isomlayout' ('isom'), 'kklayout' ('kk'), 'springlayout' ('spring'), 'staticlayout' ('static')
+* maxiterations (for frlayout): 700, integer value
+* repulsionmultipier (for frlayout): 0.75, double value
+* attractionmultiplier (for frlayout): 0.75, double value
+* maxiterations (for kklayout): 2000, integer value
+* adjustforgravity (for kklayout): true, boolean value
+* exchangevertices (for kklayout): true, boolean value
+* forcemultiplier (for springlayout): 1/3, double value
+* repulsionrange (for springlayout): 100, integer value
+* stretch (for springlayout): 0.7, double value
+* vertexlabelposition: values 'center', 'auto', 'east', 'north', 'northeast', 'northwest', 'south', 'southeast', 'southwest', 'west'.
+* vertexlabelpositioner: values 'inside', 'outside'
+* vertexfillpaint: values 'white', 'gender' (female=ff7f97, male=6c9cd1, other=ffffff genders white), 'age' (children=f9c05d, other=ffffff ages white), or any hexadecimal RGB colour value for all vertices.
+* removeunconnected: false, boolean value, remove unconnected group vertices from the graph if true
+* labeloffset: integer value.
+
+Some of the values are not immediately meaningful but tries to mirror the jung2 values and thus might be removed in case they cannot be bootstraped in this context, eg options can be dependent on other options not implemented and so on.
 
 ## Usage example
 
